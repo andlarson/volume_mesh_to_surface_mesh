@@ -18,6 +18,9 @@ typedef array<Point3D_t, 3> TriangularFace3D_t;
 //     has an associated normal.
 typedef vector<pair<TriangularFace3D_t, Vector3D_t>> SurfaceTriangleMesh_t;
 
+const uint64_t NODES_PER_TRIANGLE {3};
+const uint64_t GMSH_TET_ELEMENT_TYPE_NUM {4};
+const string GMSH_MESH_ENTITY_TYPE {"Discrete volume"};
 
 /*
     Checks that a string has .stl suffix. If it does have .stl suffix, returns
@@ -70,7 +73,7 @@ void write_to_stl(const string& stl_file_path,
 
 /*
     Checks that the currently open Gmsh model contains only a single entity
-        of type Discrete Volume, composed of a mesh of tetrahedrons. 
+        with a volumetric mesh composed of tetrahedrons. 
 */
 void check_gmsh_model()
 {
@@ -86,13 +89,11 @@ void check_gmsh_model()
     assert(dim == 3);
     string type;
     gmsh::model::getType(dim, tag, type);
-    const string MESH_ENTITY_TYPE {"Discrete volume"};
-    assert(type == MESH_ENTITY_TYPE);
+    assert(type == GMSH_MESH_ENTITY_TYPE);
     vector<int> element_types;
     gmsh::model::mesh::getElementTypes(element_types, dim, tag);
     assert(element_types.size() == 1);
-    const size_t TETRAHEDRON_ELEMENT_TYPE {4};
-    assert(element_types[0] == TETRAHEDRON_ELEMENT_TYPE);
+    assert(element_types[0] == GMSH_TET_ELEMENT_TYPE_NUM);
 }
 
 
@@ -147,13 +148,39 @@ Vector3D_t normal_to_tri_face(const TriangularFace3D_t& face)
 
 
 /*
-    Returns the surface mesh derived from the volumetric mesh contained in the
-        first entity of the currently open Gmsh model. Assumes that the volumetric
-        mesh of the currently open Gmsh model contains only triangular faces. 
+    Given the nodes that compose a tetrahedron, returns all the face tags of 
+        the faces that compose the tetrahedron. 
 */
-SurfaceTriangleMesh_t extract_surface_mesh()
+vector<size_t> faces_of_tetrahedron(const vector<size_t>& node_tags)
 {
-    // Extract basic information about the model.
+    const vector<vector<size_t>> groups_of_three_idxs {{0, 1, 2}, {0, 1, 3}, {0, 2, 3}, {1, 2, 3}};
+
+    vector<size_t> per_face_node_tags, face_tags;
+    vector<int> face_orientations;
+
+    for (const vector<size_t>& idxs : groups_of_three_idxs)
+        for (const size_t idx : idxs)
+            per_face_node_tags.push_back(node_tags[idx]);
+
+    gmsh::model::mesh::getFaces(NODES_PER_TRIANGLE, per_face_node_tags, face_tags, face_orientations);
+
+    return face_tags;
+}
+
+
+/*
+    Returns a face appearence count map for the currently open Gmsh model. The
+        map associates each face tag with the number of elements that the face
+        appears in the model. Assumes that the model contains a single entity
+        that is a tetrahedral mesh.
+    As a side effect, this function creates faces in the Gmsh data structure
+        for this model.
+*/
+unordered_map<size_t, uint64_t> count_face_appearences()
+{
+    check_gmsh_model();
+
+    // Extract necessary information about the model.
     vector<pair<int, int>> entities;
     gmsh::model::getEntities(entities);
     int dim {entities[0].first};
@@ -164,47 +191,58 @@ SurfaceTriangleMesh_t extract_surface_mesh()
     // Create all the faces in this model. By default, the data structure for the
     //     model doesn't store faces.
     gmsh::model::mesh::createFaces(entities);
-    
     vector<size_t> face_nodes, face_tags;
-    const uint64_t NODES_PER_TRIANGLE {3};
     gmsh::model::mesh::getAllFaces(NODES_PER_TRIANGLE, face_tags, face_nodes);
 
-    // Create a mapping: For each face, the mapping will store the number of distinct
+    // Create a mapping: For each face, the mapping will store the number of 
     //     elements that the face appears in. 
-    unordered_map<size_t, uint64_t> face_to_appearence_cnt;
+    unordered_map<size_t, uint64_t> face_appearence_cnt;
     for (const size_t& face_tag : face_tags)
-        assert(face_to_appearence_cnt.insert({face_tag, 0}).second);
+        assert(face_appearence_cnt.insert({face_tag, 0}).second);
 
     // Get all the elements in the model.
     vector<vector<size_t>> per_elem_type_node_tags, per_elem_type_element_tags;
     gmsh::model::mesh::getElements(element_types, per_elem_type_element_tags, per_elem_type_node_tags, dim, tag);
     
-    // For each element of every type, figure out which nodes are in the element
-    //     and use the nodes to determine which faces are in the element. Every
+    // For each tetrahedron, figure out which nodes are in the tetrahedron 
+    //     and use the nodes to determine which faces are in the tetrahedron. Every
     //     time a face is encountered, increment its count.
     vector<size_t> node_tags;
     int element_type;
-    vector<int> face_orientations;
-    const vector<vector<size_t>> groups_of_three_idxs {{0, 1, 2}, {0, 1, 3}, {0, 2, 3}, {1, 2, 3}};
-    for (uint64_t type_idx {0}; type_idx < element_types.size(); ++type_idx)
+    for (const size_t element_tag : per_elem_type_element_tags[0])
     {
-        const int type {element_types[type_idx]};
-        for (const size_t element_tag : per_elem_type_element_tags[type_idx])
-        {
-            gmsh::model::mesh::getElement(element_tag, element_type, node_tags, dim, tag); 
+        // Get the nodes of the tetrahedron.
+        gmsh::model::mesh::getElement(element_tag, element_type, node_tags, dim, tag); 
+        
+        // Get the faces.
+        const vector<size_t> face_tags {faces_of_tetrahedron(node_tags)};
 
-            // For the collection of nodes that make up an element, get all the
-            //     faces that are part of the element.
-            vector<size_t> per_face_node_tags;
-            for (const vector<size_t>& idxs : groups_of_three_idxs)
-                for (const size_t idx : idxs)
-                    per_face_node_tags.push_back(node_tags[idx]);
-            gmsh::model::mesh::getFaces(NODES_PER_TRIANGLE, per_face_node_tags, face_tags, face_orientations);
-
-            for (const size_t tag : face_tags)
-                face_to_appearence_cnt.at(tag) += 1;             
-        }
+        for (const size_t tag : face_tags)
+            face_appearence_cnt.at(tag) += 1;             
     }
+
+    return face_appearence_cnt;
+}
+
+
+/*
+    Returns the surface mesh derived from the volumetric mesh contained in the
+        currently open Gmsh model. Assumes that the currently open Gmsh model
+        contains only a single entity and the entity contains a tetrahedral
+        mesh. 
+*/
+SurfaceTriangleMesh_t extract_surface_mesh()
+{
+    check_gmsh_model();
+
+    // Extract necessary information about the model.
+    vector<pair<int, int>> entities;
+    gmsh::model::getEntities(entities);
+    int dim {entities[0].first};
+    int tag {entities[0].second};
+
+    // Get the face count mapping.
+    auto face_appearence_cnts {count_face_appearences()};
 
     /* 
         For each face that belongs to only a single volumetric element, we would
@@ -252,44 +290,36 @@ SurfaceTriangleMesh_t extract_surface_mesh()
                     structure.
     */
     
+    vector<size_t> surface_elements, node_tags, face_tags;
+    int element_type;
+    vector<int> element_types;
+    vector<vector<size_t>> per_elem_type_node_tags, per_elem_type_element_tags;
+    gmsh::model::mesh::getElements(element_types, per_elem_type_element_tags, per_elem_type_node_tags, dim, tag);
+
     // Identify the surface elements using the surface faces.
-    vector<size_t> surface_elements;
-    for (uint64_t type_idx {0}; type_idx < element_types.size(); ++type_idx)
+    for (const size_t element_tag : per_elem_type_element_tags[0])
     {
-        const int type {element_types[type_idx]};
-        for (const size_t element_tag : per_elem_type_element_tags[type_idx])
+        // Get the nodes of the element.
+        gmsh::model::mesh::getElement(element_tag, element_type, node_tags, dim, tag); 
+        
+        // Get the faces of the element.
+        const vector<size_t> face_tags {faces_of_tetrahedron(node_tags)};
+
+        // If one of the faces is a surface face, then this is a surface
+        //     element.
+        for (const size_t face_tag : face_tags)
         {
-            // Get the nodes associated with the element.
-            gmsh::model::mesh::getElement(element_tag, element_type, node_tags, dim, tag); 
-            
-            // For the collection of nodes that make up an element, get all the
-            //     faces that are part of the element.
-            vector<size_t> per_face_node_tags;
-            for (const vector<size_t>& idxs : groups_of_three_idxs)
-                for (const size_t idx : idxs)
-                    per_face_node_tags.push_back(node_tags[idx]);
-            gmsh::model::mesh::getFaces(NODES_PER_TRIANGLE, per_face_node_tags, face_tags, face_orientations);
-
-            // If one of the faces is a surface face, then this is a surface
-            //     element.
-            for (const size_t face_tag : face_tags)
+            if (face_appearence_cnts.at(face_tag) == 1)
             {
-                if (face_to_appearence_cnt.at(face_tag) == 1)
-                {
-                    surface_elements.push_back(element_tag);
+                surface_elements.push_back(element_tag);
 
-                    // Even if a single element has multiple surface faces, it
-                    //     should only be added to the surface elements collection
-                    //     once.
-                    break;
-                }
+                // Even if a single element has multiple surface faces, it
+                //     should only be added to the surface elements collection
+                //     once.
+                break;
             }
         }
     }
-    
-    // Identify and store the nodes on the surface faces using the surface
-    //     elements.
-    SurfaceTriangleMesh_t ret;
     
     /*
         The surface mesh representation requires consistent face normals. However, Gmsh's
@@ -313,36 +343,19 @@ SurfaceTriangleMesh_t extract_surface_mesh()
             compute the normal and ensure that the normal points outside. This
             makes it possible to compute consistent face normals.
     */
+    SurfaceTriangleMesh_t ret;
     const vector<vector<size_t>> gmsh_cw_tet_node_perms {{0, 1, 3}, {2, 3, 1}, {0, 3, 2}, {0, 2, 1}};
 
-    // DEBUG: Consider one surface element only.
-    // for (size_t i {1}; i < 2; i++)
+    vector<int> face_orientations;
     for (const size_t element_tag : surface_elements)
     {
-        // DEBUG: Consider one surfaace element only.
-        // const size_t element_tag {surface_elements[i]};
-
         gmsh::model::mesh::getElement(element_tag, element_type, node_tags, dim, tag);
         
-        /*
-        // DEBUG: Consider one surface element only.
-        cout << "For this element, the order of the node tags is: ";
-        for (const size_t node_tag : node_tags)
-            cout << node_tag << " "; 
-        cout << endl;
-        vector<double> coord;
-        vector<double> parametric_coord;
-        cout << "For this element, the coordinates of the nodes are: " << endl;
-        for (const size_t node_tag : node_tags)
-        {
-            gmsh::model::mesh::getNode(node_tag, coord, parametric_coord, dim, tag);
-            cout << "Node tag " << node_tag << " : " << "(" << coord.at(0) << ", " << coord.at(1) << ", " << coord.at(2) << ")" << endl;
-        }
-        */
-
         // Consider each group of three nodes that make up the element.
         for (const vector<size_t>& idxs : gmsh_cw_tet_node_perms)
         {
+            // Visit the nodes on the face in counter clockwise order, when looking
+            //     into the face.
             vector<size_t> potential_surface_node_tags;
             for (const size_t idx : idxs)
                 potential_surface_node_tags.push_back(node_tags[idx]); 
@@ -351,56 +364,21 @@ SurfaceTriangleMesh_t extract_surface_mesh()
             gmsh::model::mesh::getFaces(NODES_PER_TRIANGLE, potential_surface_node_tags, face_tags, face_orientations);
             assert(face_tags.size() == 1);
 
-            // DEBUG: Consider one surface element only.
-            // if (face_to_appearence_cnt.at(face_tags[0]) != 0)
-
             // If these nodes correspond to a surface face, hurrah!
-            if (face_to_appearence_cnt.at(face_tags[0]) == 1)
+            if (face_appearence_cnts.at(face_tags[0]) == 1)
             {
                 vector<double> coord;
                 vector<double> parametric_coord;
                 TriangularFace3D_t face;
 
-                // DEBUG: Retrieving normal with parametric coords.
-                // array<vector<double>, NODES_PER_TRIANGLE> per_node_parametric_coord;
-                
-                // Populate the face with three nodes.
+                // Populate the vertices of the face in counter clockwise order, 
+                //     when looking into the face. 
                 for (size_t idx {0}; idx < NODES_PER_TRIANGLE; ++idx)
                 {
                     gmsh::model::mesh::getNode(potential_surface_node_tags[idx], coord, parametric_coord, dim, tag);
                     Point3D_t surface_node {coord.at(0), coord.at(1), coord.at(2)};
                     face[idx] = surface_node;
-
-                    // DEBUG: Retrieving normal with parametric coords.
-                    // per_node_parametric_coord.at(idx) = parametric_coord;
                 }
-
-                // DEBUG: Retrieving normal with parametric coords.
-                // Compute the normal to this face using the parametric
-                //     coordinates of the nodes that compose this face.
-                //     Since the getNormal() only accepts parametric coordinates,
-                //     we can compute the normal at the center of the surface
-                //     face by computing the average parametric coordinate of
-                //     the nodes that compose the face. This assumes that the
-                //     parameterization is linear.
-                /*
-                vector<double> normals;
-                const size_t PARAMETRIC_COORD_CNT {2};
-                array<double, PARAMETRIC_COORD_CNT> average_parametric_coord;
-                for (const vector<double>& pc : per_node_parametric_coord)
-                {
-                    assert(pc.size() == PARAMETRIC_COORD_CNT);                     
-                    average_parametric_coord.at(0) += pc.at(0); 
-                    average_parametric_coord.at(1) += pc.at(1); 
-                }
-                average_parametric_coord.at(0) /= per_node_parametric_coord.size();
-                average_parametric_coord.at(1) /= per_node_parametric_coord.size();
-                gmsh::model::getNormal(tag, {average_parametric_coord.begin(), average_parametric_coord.end()}, normals);
-                assert(normals.size() == 1);
-                Vector3D_t normal {normals.at(0), normals.at(1), normals.at(2)};
-
-                ret.push_back({face, normal});
-                */
 
                 ret.push_back({face, normal_to_tri_face(face)});
             }
@@ -434,7 +412,9 @@ void volume_mesh_to_surface_mesh(const string& msh_file_path,
 int main(int argc, char *argv[])
 {
     CLI::App app{"Converts a volumetric mesh in Gmsh's .msh format to a surface "
-                 "mesh in .stl format."};
+                 "mesh in .stl format. Expects the input .msh file to contain a "
+                 "a single entity composed of a single volumetric mesh containing "
+                 "tetrahedrons."};
     argv = app.ensure_utf8(argv);
     
     string msh_file_path;
