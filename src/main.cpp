@@ -49,19 +49,19 @@ void write_to_stl(const string& stl_file_path,
 
     for (const auto& triangle : triangle_surface_mesh)
     {
-        f << "facet normal " << triangle.second[0] << ", " << triangle.second[1] << ", " << triangle.second[2] << endl;
-        f << "outer loop" << endl;
+        f << "  facet normal " << triangle.second[0] << " " << triangle.second[1] << " " << triangle.second[2] << endl;
+        f << "    outer loop" << endl;
         for (const Point3D_t& point : triangle.first)
         {
-            f << "vertex";
+            f << "      vertex";
             for (const double coord : point)
             {
                 f << " " << coord;
             }
             f << endl;
         }
-        f << "end loop" << endl;
-        f << "end facet" << endl;
+        f << "    end loop" << endl;
+        f << "  end facet" << endl;
     }
 
     f << "endsolid " << SOLID_NAME;
