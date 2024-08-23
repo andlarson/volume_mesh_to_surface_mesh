@@ -10,8 +10,8 @@
 
 using namespace std;
 
-typedef array<double, 3>  Point3D_t;
-typedef array<double, 3>  Vector3D_t;
+typedef array<double, 3> Point3D_t;
+typedef array<double, 3> Vector3D_t;
 typedef array<Point3D_t, 3> TriangularFace3D_t;
 
 // A surface mesh is a collection of faces with associated normals. Each face 
@@ -38,7 +38,6 @@ string has_stl_suffix(const string& str)
 /*
     Writes the surface mesh data structure to the desired .stl file path. If the
         .stl file already exists, it is overwritten.
-    Surface normals are not written to the .stl file. 
 */
 void write_to_stl(const string& stl_file_path,
                   const SurfaceTriangleMesh_t& triangle_surface_mesh)
@@ -50,9 +49,7 @@ void write_to_stl(const string& stl_file_path,
 
     for (const auto& triangle : triangle_surface_mesh)
     {
-        // TODO: Add normals!
-        // Don't produce normals in the .stl file.
-        f << "facet normal 0, 0, 0" << endl;
+        f << "facet normal " << triangle.second[0] << ", " << triangle.second[1] << ", " << triangle.second[2] << endl;
         f << "outer loop" << endl;
         for (const Point3D_t& point : triangle.first)
         {
