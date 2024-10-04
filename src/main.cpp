@@ -60,8 +60,8 @@ void write_to_stl(const string& stl_file_path,
             }
             f << endl;
         }
-        f << "    end loop" << endl;
-        f << "  end facet" << endl;
+        f << "    endloop" << endl;
+        f << "  endfacet" << endl;
     }
 
     f << "endsolid " << SOLID_NAME;

@@ -3,10 +3,7 @@ project(volume_mesh_to_surface_mesh LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
-
-# ------------------------------------------------------------------------------
-#                                   Executable 
-# ------------------------------------------------------------------------------
+set(CMAKE_EXPORT_COMPILE_COMMANDS True)
 
 set(CMAKE_MODULE_PATH "/Users/andrewlarson/Desktop/misc/programming/cmake_utils/find_modules")
 
