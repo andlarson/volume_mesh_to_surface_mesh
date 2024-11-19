@@ -34,7 +34,7 @@ const string GMSH_MESH_ENTITY_TYPE {"Discrete volume"};
 */
 string has_stl_suffix(const string& str)
 {
-    if (!(str.substr(str.size()-5, 4) == ".stl"))
+    if (!(str.substr(str.size()-4) == ".stl"))
         return "Desired output file doesn't end with .stl suffix!"; 
     else
         return "";
