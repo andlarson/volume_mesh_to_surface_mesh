@@ -1,11 +1,17 @@
+// Standard library.
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <unordered_map>
 #include <array>
+#include <cassert>
 
+// Third party.
+
+// CLI11
 #include "CLI/CLI.hpp"
 
+// GMsh
 #include "gmsh.h"
 
 using namespace std;
@@ -28,7 +34,7 @@ const string GMSH_MESH_ENTITY_TYPE {"Discrete volume"};
 */
 string has_stl_suffix(const string& str)
 {
-    if (!str.ends_with(".stl"))
+    if (!(str.substr(str.size()-5, 4) == ".stl"))
         return "Desired output file doesn't end with .stl suffix!"; 
     else
         return "";
@@ -412,7 +418,6 @@ int main(int argc, char *argv[])
                  "mesh in .stl format. Expects the input .msh file to contain a "
                  "a single entity composed of a single volumetric mesh containing "
                  "tetrahedrons."};
-    argv = app.ensure_utf8(argv);
     
     string msh_file_path;
     app.add_option("-i,--input", msh_file_path, "Path to the .msh file "
