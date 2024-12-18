@@ -24,9 +24,15 @@ typedef array<Point3D_t, 3> TriangularFace3D_t;
 //     has an associated normal.
 typedef vector<pair<TriangularFace3D_t, Vector3D_t>> SurfaceTriangleMesh_t;
 
-const uint64_t NODES_PER_TRIANGLE {3};
-const uint64_t GMSH_TET_ELEMENT_TYPE_NUM {4};
+const int VERTICES_PER_TRIANGLE {3};
+const int GMSH_TET_ELEMENT_TYPE_NUM {4};
 const string GMSH_MESH_ENTITY_TYPE {"Discrete volume"};
+const string DEFAULT_SOLID_NAME {"from_volumetric_gmsh"};
+const int FP_WRITE_PRECISION {25};
+const int SPACES_PER_TAB {4};
+const string FOUR_SPACES (SPACES_PER_TAB, ' ');
+const string EIGHT_SPACES (2 * SPACES_PER_TAB, ' ');
+const string TWELVE_SPACES (3 * SPACES_PER_TAB, ' ');
 
 /*
     Checks that a string has .stl suffix. If it does have .stl suffix, returns
@@ -40,7 +46,6 @@ string has_stl_suffix(const string& str)
         return "";
 }
 
-
 /*
     Writes the surface mesh data structure to the desired .stl file path. If the
         .stl file already exists, it is overwritten.
@@ -49,30 +54,33 @@ void write_to_stl(const string& stl_file_path,
                   const SurfaceTriangleMesh_t& triangle_surface_mesh)
 {
     ofstream f {stl_file_path};
+
+    // Ensure that sufficient precision is used when writing to the .stl. 
+    f.precision(FP_WRITE_PRECISION);
+
+    assert(f.good());
     
-    const string SOLID_NAME {"from_volumetric_gmsh"};
-    f << "solid " << SOLID_NAME << endl;
+    f << "solid " << DEFAULT_SOLID_NAME << endl;
 
     for (const auto& triangle : triangle_surface_mesh)
     {
-        f << "  facet normal " << triangle.second[0] << " " << triangle.second[1] << " " << triangle.second[2] << endl;
-        f << "    outer loop" << endl;
+        f << FOUR_SPACES << "facet normal " << triangle.second[0] << " " << triangle.second[1] << " " << triangle.second[2] << endl;
+        f << EIGHT_SPACES << "outer loop" << endl;
         for (const Point3D_t& point : triangle.first)
         {
-            f << "      vertex";
+            f << TWELVE_SPACES << "vertex";
             for (const double coord : point)
             {
                 f << " " << coord;
             }
             f << endl;
         }
-        f << "    endloop" << endl;
-        f << "  endfacet" << endl;
+        f << EIGHT_SPACES << "endloop" << endl;
+        f << FOUR_SPACES << "endfacet" << endl;
     }
 
-    f << "endsolid " << SOLID_NAME;
+    f << "endsolid " << DEFAULT_SOLID_NAME;
 }
-
 
 /*
     Checks that the currently open Gmsh model contains only a single entity
@@ -99,7 +107,6 @@ void check_gmsh_model()
     assert(element_types[0] == GMSH_TET_ELEMENT_TYPE_NUM);
 }
 
-
 /*
     Computes the cross product between two vectors.
 */
@@ -120,7 +127,6 @@ Vector3D_t cross_product(const Vector3D_t& v1, const Vector3D_t& v2)
 
     return ret;
 }
-
 
 /*
     Computes the vector pointing from one point to another. Returns the vector
@@ -149,7 +155,6 @@ Vector3D_t normal_to_tri_face(const TriangularFace3D_t& face)
     return cross_product(v1, v2);
 }
 
-
 /*
     Given the nodes that compose a tetrahedron, returns all the face tags of 
         the faces that compose the tetrahedron. 
@@ -165,7 +170,7 @@ vector<size_t> faces_of_tetrahedron(const vector<size_t>& node_tags)
         for (const size_t idx : idxs)
             per_face_node_tags.push_back(node_tags[idx]);
 
-    gmsh::model::mesh::getFaces(NODES_PER_TRIANGLE, per_face_node_tags, face_tags, face_orientations);
+    gmsh::model::mesh::getFaces(VERTICES_PER_TRIANGLE, per_face_node_tags, face_tags, face_orientations);
 
     return face_tags;
 }
@@ -195,7 +200,7 @@ unordered_map<size_t, uint64_t> count_face_appearences()
     //     model doesn't store faces.
     gmsh::model::mesh::createFaces(entities);
     vector<size_t> face_nodes, face_tags;
-    gmsh::model::mesh::getAllFaces(NODES_PER_TRIANGLE, face_tags, face_nodes);
+    gmsh::model::mesh::getAllFaces(VERTICES_PER_TRIANGLE, face_tags, face_nodes);
 
     // Create a mapping: For each face, the mapping will store the number of 
     //     elements that the face appears in. 
@@ -226,7 +231,6 @@ unordered_map<size_t, uint64_t> count_face_appearences()
 
     return face_appearence_cnt;
 }
-
 
 /*
     Returns the surface mesh derived from the volumetric mesh contained in the
@@ -364,7 +368,7 @@ SurfaceTriangleMesh_t extract_surface_mesh()
                 potential_surface_node_tags.push_back(node_tags[idx]); 
             
             // Get the face the three nodes are a part of.
-            gmsh::model::mesh::getFaces(NODES_PER_TRIANGLE, potential_surface_node_tags, face_tags, face_orientations);
+            gmsh::model::mesh::getFaces(VERTICES_PER_TRIANGLE, potential_surface_node_tags, face_tags, face_orientations);
             assert(face_tags.size() == 1);
 
             // If these nodes correspond to a surface face, hurrah!
@@ -376,7 +380,7 @@ SurfaceTriangleMesh_t extract_surface_mesh()
 
                 // Populate the vertices of the face in counter clockwise order, 
                 //     when looking into the face. 
-                for (size_t idx {0}; idx < NODES_PER_TRIANGLE; ++idx)
+                for (size_t idx {0}; idx < VERTICES_PER_TRIANGLE; ++idx)
                 {
                     gmsh::model::mesh::getNode(potential_surface_node_tags[idx], coord, parametric_coord, dim, tag);
                     Point3D_t surface_node {coord.at(0), coord.at(1), coord.at(2)};
@@ -390,7 +394,6 @@ SurfaceTriangleMesh_t extract_surface_mesh()
 
     return ret;
 }
-
 
 /*
     Given a Gmsh .msh file containing a volumetric mesh composed of tetrahedrons, 
@@ -410,7 +413,6 @@ void volume_mesh_to_surface_mesh(const string& msh_file_path,
 
     write_to_stl(stl_file_path, surface_mesh);
 }
-
 
 int main(int argc, char *argv[])
 {
